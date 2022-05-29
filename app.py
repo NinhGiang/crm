@@ -23,10 +23,11 @@ import torchvision
 
 from flask import Flask, request
 from flask_cors import CORS
+from flask_socketio import SocketIO, send
 app = Flask(__name__)
 CORS(app)
 DETECTION_URL = "/v1/object-detection/yolov5s"
-
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 @app.route(DETECTION_URL, methods=["POST"])
 def predict():
@@ -92,7 +93,7 @@ def predict():
                     crop_result_list.append(create_json_image(mediaID, crop_url, most, 2))
                 results.pred[0][index, 5] = torch.Tensor([index])
                 crop_count += 1
-            
+
             ### statuscode: 3 - image classified, generating result
             update_media_status(usermedia, 3)
             ###
@@ -243,6 +244,7 @@ def put_to_database(media_result, crop_result_list, annotation_result):
     for item in crop_result_list:
         i += 1
         response = requests.post(post_image, json=item)
+        emit('updatedFile', {'data': post_image.userMediaId}, broadcast=True)
         #print(response.content)
         print("Post item " + str(i) + " to image status code: ", response.status_code)
     # post to annotation
@@ -307,7 +309,24 @@ def most_common(lst):
     a = max(set(lst), key=lst.count)
     return a, lst.count(a)
 
+# SocketIO Events
+@socketio.on('connect')
+def connected():
+    print('Connected')
+
+@socketio.on('disconnect')
+def disconnected():
+    print('Disconnected')
+
+@socketio.on('updatedFile')
+def userAdded(file):
+    print('update_media_status')
+
 if __name__ == "__main__":
+    put_usermedia = "https://coraldetectionmodel.azurewebsites.net/api/1/UserMedia"
+    post_annotation = "https://coraldetectionmodel.azurewebsites.net/api/1/Annotation"
+    post_image = "https://coraldetectionmodel.azurewebsites.net/api/1/Image"
+    socketio.run(app, debug=True)
     parser = argparse.ArgumentParser(description="Flask api exposing yolov5 model")
     parser.add_argument("--port", default=5000, type=int, help="port number")
     args = parser.parse_args()
@@ -315,10 +334,10 @@ if __name__ == "__main__":
     clear_directories()
 
     model = torch.hub.load(
-        "ultralytics/yolov5", "custom", path=str(os.getcwd())+'\\myyolov5.pt', force_reload=True, source='github', autoshape=True
+        "ultralytics/yolov5", "custom", path=str(os.getcwd())+'/myyolov5.pt', force_reload=True, source='github', autoshape=True
     )  # force_reload = recache latest code
     model.eval()
-    data = fastai.vision.data.ImageDataBunch.from_folder(str(os.getcwd())+"\\data\\",
+    data = fastai.vision.data.ImageDataBunch.from_folder(str(os.getcwd())+"/data",
                                                          size=224, num_workers=6).normalize(([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
     #data = ImageDataLoaders.from_folder(str(os.getcwd())+"\\data\\",
     #                                                     size=224, num_workers=6).normalize(([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
@@ -327,9 +346,6 @@ if __name__ == "__main__":
     modelc = fastai.vision.learner.cnn_learner(data, torchvision.models.resnet101, path="gs://crm-storage-v1.appspot.com/resnet/models/best_resnet101_cpu_v5.pth")
     #modelc.load("best_resnet101_cpu")
 
-    put_usermedia = "https://coraldetectionmodel.azurewebsites.net/api/1/UserMedia"
-    post_annotation = "https://coraldetectionmodel.azurewebsites.net/api/1/Annotation"
-    post_image = "https://coraldetectionmodel.azurewebsites.net/api/1/Image"
 
     # Your credentials after create a app web project.
     config = {
