@@ -4,6 +4,7 @@ Run a rest API exposing the yolov5s object detection model
 import argparse
 from importlib.resources import path
 import io
+from urllib.request import urlopen
 from PIL import Image
 import os
 import requests
@@ -11,6 +12,7 @@ import pyrebase
 import cv2
 import multiprocessing
 from datetime import datetime
+import numpy as np
 
 import torch
 
@@ -38,9 +40,27 @@ def predict():
         usermedia = get_media_info(mediaID)
         albumID = usermedia['albumId']
         response = requests.get(usermedia["mediaURL"])
+        print(usermedia["mediaURL"])
         if usermedia['isImage'] == True:
             img = Image.open(io.BytesIO(response.content))
+            print(img.format)
+            print(img.format_description)
+
+            ### statuscode: 1 - image received
+            update_media_status(usermedia, 1)
+            ###
+
+            #req = urlopen(usermedia["mediaURL"])
+            #arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
+            #img_temp = cv2.imdecode(arr, -1) # 'Load it as it is'
+            #print(type(img_temp))
             results = model(img)
+
+            ### statuscode: 2 - image detected, classifying
+            update_media_status(usermedia, 2)
+            ###
+
+            print("da apply result")
             crop_count = 0
             pred_list = []
             crop_result_list = []
@@ -72,6 +92,11 @@ def predict():
                     crop_result_list.append(create_json_image(mediaID, crop_url, most, 2))
                 results.pred[0][index, 5] = torch.Tensor([index])
                 crop_count += 1
+            
+            ### statuscode: 3 - image classified, generating result
+            update_media_status(usermedia, 3)
+            ###
+
             results.names = pred_list
             annotation = create_annotation(mediaID, 1, results.pandas().xyxy[0].to_json(orient="records"))
             results.render()  # updates results.imgs with boxes and labels
@@ -83,6 +108,16 @@ def predict():
             usermedia["isDetected"] = True
             usermedia["detectedMediaURL"] = img_url
             put_to_database(usermedia, crop_result_list, annotation)
+
+            if crop_count == 0:
+                ### statuscode: 7 - done, no coral detected
+                update_media_status(usermedia, 7)
+                ###
+            else:
+                ### statuscode: 8 - done, coral detected
+                update_media_status(usermedia, 8)
+                ###
+
         else:
             print("URL la", usermedia["mediaURL"])
             generate_video(usermedia["mediaURL"], usermedia, albumID, mediaID)
@@ -94,13 +129,28 @@ def generate_video(filepath, usermedia, albumID, mediaID):
     width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)) # get width
     height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)) # get height
     length = int(vid.get(cv2.CAP_PROP_FRAME_COUNT)) # get length
+
+    ### statuscode: 4 - video received, extracting frames
+    update_media_status(usermedia, 4)
+    ###
+
     print("Num of frames: ", length)
     size = (width, height)
     video_local_path = str(os.getcwd())+ "/static/" + str(albumID) + "_" + str(mediaID) + ".mp4"
     out = cv2.VideoWriter(video_local_path,cv2.VideoWriter_fourcc(*'avc1'), fps, size) # create output video object
     results_list = []
     frames_list = get_all_frames(vid)
+
+    ### statuscode: 5 - frames extracted, detecting and classifying
+    update_media_status(usermedia, 5)
+    ###
+
     process_video(frames_list, results_list, albumID, mediaID)
+
+    ### statuscode: 6 - detected and classified, generating video
+    update_media_status(usermedia, 6)
+    ###
+
     results_list.sort()
     for image_path in results_list:
         out.write(cv2.imread(image_path))
@@ -111,6 +161,10 @@ def generate_video(filepath, usermedia, albumID, mediaID):
     usermedia["isDetected"] = True
     usermedia["detectedMediaURL"] = video_url
     put_to_database(usermedia, [], [])
+
+    ### statuscode: 8 - done, coral detected
+    update_media_status(usermedia, 8)
+    ###
 
     #return redirect("static/video.mp4")
     return
@@ -224,6 +278,22 @@ def create_annotation(usermediaID, timestamp, jsonstring):
         "timestamp": timestamp,
         "annotationURL": jsonstring
         }
+
+def update_media_status(usermedia, statuscode):
+    temp = {
+        "userMediaId": usermedia['userMediaId'],
+        "albumId": usermedia['albumId'],
+        "mediaURL": usermedia['mediaURL'],
+        "isImage": usermedia['isImage'],
+        "isDetected": usermedia['isDetected'],
+        "detectedMediaURL": usermedia['detectedMediaURL'],
+        "userMediaName": usermedia['userMediaName'],
+        "status": statuscode,
+        "createdTime": usermedia['createdTime'],
+        "isDeleted": usermedia['isDeleted']
+    }
+    response = requests.put(put_usermedia, json=temp)
+    print("Update usermedia status status code: ", response.status_code)
 
 def clear_directories():
     dir1 = 'temp'
