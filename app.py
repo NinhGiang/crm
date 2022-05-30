@@ -244,7 +244,6 @@ def put_to_database(media_result, crop_result_list, annotation_result):
     for item in crop_result_list:
         i += 1
         response = requests.post(post_image, json=item)
-        emit('updatedFile', {'data': post_image.userMediaId}, broadcast=True)
         #print(response.content)
         print("Post item " + str(i) + " to image status code: ", response.status_code)
     # post to annotation
@@ -295,6 +294,7 @@ def update_media_status(usermedia, statuscode):
         "isDeleted": usermedia['isDeleted']
     }
     response = requests.put(put_usermedia, json=temp)
+    socketio.emit('updatedFile', {'data': usermedia['userMediaId']}, broadcast=True)
     print("Update usermedia status status code: ", response.status_code)
 
 def clear_directories():
@@ -326,7 +326,6 @@ if __name__ == "__main__":
     put_usermedia = "https://coraldetectionmodel.azurewebsites.net/api/1/UserMedia"
     post_annotation = "https://coraldetectionmodel.azurewebsites.net/api/1/Annotation"
     post_image = "https://coraldetectionmodel.azurewebsites.net/api/1/Image"
-    socketio.run(app, debug=True)
     parser = argparse.ArgumentParser(description="Flask api exposing yolov5 model")
     parser.add_argument("--port", default=5000, type=int, help="port number")
     args = parser.parse_args()
@@ -362,3 +361,4 @@ if __name__ == "__main__":
     storage = firebase.storage()
 
     app.run(host="0.0.0.0", port=args.port, debug=True)  # debug=True causes Restarting with stat
+    socketio.run(app, debug=True)
