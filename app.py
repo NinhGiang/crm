@@ -69,6 +69,8 @@ def predict():
                 crop = img.crop((row['xmin'], row['ymin'], row['xmax'], row['ymax'])) # get crop
                 file_name = str(albumID) + "_" + str(mediaID) + "_" + str(crop_count) # tao file name tren firebase
                 path_local = str(os.getcwd()) + "\\temp\\" + file_name + ".jpg" # tao file name local
+                if crop.mode in ("RGBA", "P"):
+                    crop = crop.convert("RGB")
                 crop.save(path_local, format="JPEG") # save local
                 print("Path ne:", path_local)
                 crop_url = upload_to_firebase("crop", file_name, path_local) # upload len firebase, lay url
